@@ -1,5 +1,6 @@
 from flask import Flask, jsonify
 import os
+import re
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_migrate import Migrate
@@ -13,7 +14,19 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(get_config()
 
-    # --- JWT cookies para cross-site (Codespaces/localhost) ---
+    
+    # --- CORS con credenciales (Codespaces: *.app.github.dev) ---
+    origin_pat = os.getenv("FRONTEND_ORIGIN")
+    if origin_pat:
+        try:
+            origin_val = re.compile(origin_pat)
+        except re.error:
+            origin_val = origin_pat  # si te pasan un host exacto
+    else:
+        origin_val = re.compile(r"https://.*\.app\.github\.dev$")
+    CORS(app, resources={r"/api/*": {"origins": origin_val, "supports_credentials": True}})
+
+# --- JWT cookies para cross-site (Codespaces/localhost) ---
     app.config.setdefault("JWT_TOKEN_LOCATION", ["cookies"])
     app.config.setdefault("JWT_COOKIE_SECURE", True)        # https
     app.config.setdefault("JWT_COOKIE_SAMESITE", "None")    # cross-site
