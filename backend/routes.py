@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import create_access_token, set_access_cookies, unset_jwt_cookies, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
 from .db import db
 from .models import (
@@ -56,14 +56,35 @@ def seed_admin():
 @api_bp.post("/auth/login")
 def login():
     data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
+    email = data.get("email","").lower().strip()
+    password = data.get("password","")
+    rol = (data.get("rol") or data.get("role") or "").lower().strip()
+
+    # valida usuario en DB (ejemplo)
     user = Usuario.query.filter_by(email=email).first()
-    if not user or not check_password_hash(user.password_hash, password):
-        return jsonify(msg="Email o contraseña incorrectos"), 401
-    identity = json.dumps({"sub": str(user.id), "rol": user.rol})
-    token = create_access_token(identity=identity)
-    return jsonify(token=token, user=user.serialize())
+    if not user or not user.check_password(password):
+        return jsonify(ok=False, msg="Credenciales inválidas"), 401
+
+    # si manejas rol, comprueba que corresponda
+    if hasattr(user, "rol") and rol and user.rol.lower() != rol:
+        return jsonify(ok=False, msg="Rol incorrecto"), 401
+
+    token = create_access_token(identity={"id": user.id, "email": user.email, "rol": getattr(user, "rol", "").lower()})
+    resp = jsonify(ok=True, user={"id": user.id, "email": user.email, "rol": getattr(user, "rol", None)})
+    set_access_cookies(resp, token, max_age=60*60*8)  # 8h
+    return resp, 200
+
+@api_bp.post("/auth/logout")
+def logout():
+    resp = jsonify(ok=True)
+    unset_jwt_cookies(resp)
+    return resp, 200
+
+@api_bp.get("/auth/me")
+@jwt_required(locations=["cookies"])
+def auth_me():
+    ident = get_jwt_identity()  # dict con id/email/rol
+    return jsonify(ok=True, user=ident), 200
 
 # -------- USUARIOS (solo admin) --------
 @api_bp.get("/usuarios")

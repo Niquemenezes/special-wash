@@ -1,0 +1,561 @@
+from flask import Blueprint, render_template, request, Response, redirect, url_for, flash
+import os
+from .db import db
+from .models import (Producto, Proveedor, Usuario, Maquinaria, RegistroEntradaProducto, RegistroSalidaProducto)
+from sqlalchemy import or_
+from werkzeug.security import generate_password_hash
+from datetime import datetime
+
+admin_bp = Blueprint("admin", __name__, template_folder="templates/admin")
+
+def _check_basic_auth(username, password):
+    return (
+        username == os.getenv("ADMIN_USER", "admin")
+        and password == os.getenv("ADMIN_PASS", "changeme")
+    )
+
+def _auth_required(fn):
+    def wrapper(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not _check_basic_auth(auth.username, auth.password):
+            return Response(
+                "Acceso restringido.\n", 401,
+                {"WWW-Authenticate": 'Basic realm="SpecialWash Admin"'}
+            )
+        return fn(*args, **kwargs)
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
+def _count(model):
+    try:
+        return db.session.query(model).count()
+    except Exception:
+        return 0
+
+def _to_decimal(s):
+    if s is None: return None
+    s = s.strip().replace(",", ".")
+    if s == "": return None
+    try: return float(s)
+    except ValueError: return None
+
+def _parse_date_yyyy_mm_dd(s):
+    if not s: return None
+    try: return datetime.strptime(s, "%Y-%m-%d")
+    except ValueError: return None
+
+@admin_bp.route("/")
+@_auth_required
+def dashboard():
+    stats = {
+        "productos": _count(Producto),
+        "proveedores": _count(Proveedor),
+        "maquinaria": _count(Maquinaria),
+        "usuarios": _count(Usuario),
+        "entradas": _count(RegistroEntradaProducto),
+        "salidas": _count(RegistroSalidaProducto),
+    }
+    return render_template("dashboard.html", stats=stats)
+
+# -------- Productos --------
+@admin_bp.route("/productos")
+@_auth_required
+def productos_list():
+    q = db.session.query(Producto).order_by(Producto.id.desc())
+    search = request.args.get("q")
+    if search:
+        like = f"%{search}%"
+        q = q.filter((Producto.nombre.ilike(like)) | (Producto.detalle.ilike(like)) | (Producto.categoria.ilike(like)))
+    items = q.limit(1000).all()
+    return render_template("productos.html", productos=items, search=search or "")
+
+@admin_bp.route("/productos/nuevo", methods=["GET", "POST"])
+@_auth_required
+def productos_create():
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        detalle = request.form.get("detalle", "").strip()
+        categoria = request.form.get("categoria", "").strip()
+        proveedor_id = request.form.get("proveedor_id") or None
+        stock_minimo = request.form.get("stock_minimo") or None
+
+        if not nombre:
+            flash("El nombre es obligatorio", "warning")
+            return redirect(url_for("admin.productos_create"))
+
+        p = Producto(nombre=nombre, detalle=detalle or None, categoria=categoria or None)
+        if hasattr(Producto, "stock_minimo") and stock_minimo not in (None, ""):
+            try: p.stock_minimo = int(stock_minimo)
+            except ValueError: p.stock_minimo = None
+
+        if hasattr(Producto, "proveedor_id") and proveedor_id:
+            try: p.proveedor_id = int(proveedor_id)
+            except ValueError: p.proveedor_id = None
+
+        db.session.add(p); db.session.commit()
+        flash("Producto creado correctamente", "success")
+        return redirect(url_for("admin.productos_list"))
+
+    proveedores = db.session.query(Proveedor).order_by(Proveedor.nombre.asc()).all()
+    return render_template("productos_form.html", proveedores=proveedores, item=None)
+
+@admin_bp.route("/productos/<int:pid>/editar", methods=["GET", "POST"])
+@_auth_required
+def productos_edit(pid):
+    p = db.session.get(Producto, pid)
+    if not p:
+        flash("Producto no encontrado", "danger")
+        return redirect(url_for("admin.productos_list"))
+
+    if request.method == "POST":
+        p.nombre = request.form.get("nombre", "").strip() or p.nombre
+        p.detalle = request.form.get("detalle", "").strip() or None
+        p.categoria = request.form.get("categoria", "").strip() or None
+
+        stock_minimo = request.form.get("stock_minimo")
+        if hasattr(Producto, "stock_minimo"):
+            if stock_minimo in (None, ""): p.stock_minimo = None
+            else:
+                try: p.stock_minimo = int(stock_minimo)
+                except ValueError: p.stock_minimo = None
+
+        if hasattr(Producto, "proveedor_id"):
+            proveedor_id = request.form.get("proveedor_id")
+            if proveedor_id in (None, "", "0"): p.proveedor_id = None
+            else:
+                try: p.proveedor_id = int(proveedor_id)
+                except ValueError: p.proveedor_id = None
+
+        db.session.commit()
+        flash("Producto actualizado", "success")
+        return redirect(url_for("admin.productos_list"))
+
+    proveedores = db.session.query(Proveedor).order_by(Proveedor.nombre.asc()).all()
+    return render_template("productos_form.html", proveedores=proveedores, item=p)
+
+@admin_bp.route("/productos/<int:pid>/eliminar", methods=["POST"])
+@_auth_required
+def productos_delete(pid):
+    p = db.session.get(Producto, pid)
+    if not p:
+        flash("Producto no encontrado", "danger")
+        return redirect(url_for("admin.productos_list"))
+    db.session.delete(p); db.session.commit()
+    flash("Producto eliminado", "info")
+    return redirect(url_for("admin.productos_list"))
+
+# -------- Proveedores --------
+@admin_bp.route("/proveedores")
+@_auth_required
+def proveedores_list():
+    q = db.session.query(Proveedor).order_by(Proveedor.id.desc())
+    search = request.args.get("q")
+    if search:
+        like = f"%{search}%"
+        q = q.filter(Proveedor.nombre.ilike(like))
+    items = q.limit(1000).all()
+    return render_template("proveedores.html", proveedores=items, search=search or "")
+
+@admin_bp.route("/proveedores/nuevo", methods=["GET", "POST"])
+@_auth_required
+def proveedores_create():
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        contacto = request.form.get("contacto", "").strip() or None
+        telefono = request.form.get("telefono", "").strip() or None
+        email = request.form.get("email", "").strip() or None
+        if not nombre:
+            flash("El nombre es obligatorio", "warning")
+            return redirect(url_for("admin.proveedores_create"))
+        p = Proveedor(nombre=nombre)
+        if hasattr(Proveedor, "contacto"): p.contacto = contacto
+        if hasattr(Proveedor, "persona_contacto"): p.persona_contacto = contacto
+        if hasattr(Proveedor, "telefono"): p.telefono = telefono
+        if hasattr(Proveedor, "email"): p.email = email
+        db.session.add(p); db.session.commit()
+        flash("Proveedor creado", "success")
+        return redirect(url_for("admin.proveedores_list"))
+    return render_template("proveedores_form.html", item=None)
+
+@admin_bp.route("/proveedores/<int:pid>/editar", methods=["GET", "POST"])
+@_auth_required
+def proveedores_edit(pid):
+    p = db.session.get(Proveedor, pid)
+    if not p:
+        flash("Proveedor no encontrado", "danger")
+        return redirect(url_for("admin.proveedores_list"))
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        contacto = request.form.get("contacto", "").strip() or None
+        telefono = request.form.get("telefono", "").strip() or None
+        email = request.form.get("email", "").strip() or None
+        if nombre: p.nombre = nombre
+        if hasattr(Proveedor, "contacto"): p.contacto = contacto
+        if hasattr(Proveedor, "persona_contacto"): p.persona_contacto = contacto
+        if hasattr(Proveedor, "telefono"): p.telefono = telefono
+        if hasattr(Proveedor, "email"): p.email = email
+        db.session.commit()
+        flash("Proveedor actualizado", "success")
+        return redirect(url_for("admin.proveedores_list"))
+    contacto = getattr(p, "contacto", None) or getattr(p, "persona_contacto", None)
+    telefono = getattr(p, "telefono", None)
+    email = getattr(p, "email", None)
+    return render_template("proveedores_form.html", item=p, contacto=contacto, telefono=telefono, email=email)
+
+@admin_bp.route("/proveedores/<int:pid>/eliminar", methods=["POST"])
+@_auth_required
+def proveedores_delete(pid):
+    p = db.session.get(Proveedor, pid)
+    if not p:
+        flash("Proveedor no encontrado", "danger")
+        return redirect(url_for("admin.proveedores_list"))
+    db.session.delete(p); db.session.commit()
+    flash("Proveedor eliminado", "info")
+    return redirect(url_for("admin.proveedores_list"))
+
+# -------- Entradas --------
+def _calc_precio_con_iva(precio_sin_iva, porcentaje_iva, descuento):
+    precio_sin_iva = precio_sin_iva or 0.0
+    porcentaje_iva = porcentaje_iva or 0.0
+    descuento = descuento or 0.0
+    return round(precio_sin_iva * (1.0 + (porcentaje_iva / 100.0)) - descuento, 2)
+
+@admin_bp.route("/entradas")
+@_auth_required
+def entradas_list():
+    q = db.session.query(RegistroEntradaProducto).order_by(RegistroEntradaProducto.id.desc())
+    f_desde = request.args.get("desde"); f_hasta = request.args.get("hasta"); f_proveedor = request.args.get("proveedor_id")
+    d = _parse_date_yyyy_mm_dd(f_desde);  h = _parse_date_yyyy_mm_dd(f_hasta)
+    if d: q = q.filter(RegistroEntradaProducto.fecha_entrada >= d)
+    if h: q = q.filter(RegistroEntradaProducto.fecha_entrada <= h)
+    if f_proveedor and f_proveedor.isdigit(): q = q.filter(RegistroEntradaProducto.proveedor_id == int(f_proveedor))
+    entradas = q.limit(1000).all()
+    proveedores = db.session.query(Proveedor).order_by(Proveedor.nombre.asc()).all()
+    return render_template("entradas.html", entradas=entradas, proveedores=proveedores,
+        desde=f_desde or "", hasta=f_hasta or "", proveedor_id=int(f_proveedor) if f_proveedor and f_proveedor.isdigit() else "")
+
+@admin_bp.route("/entradas/nuevo", methods=["GET", "POST"])
+@_auth_required
+def entradas_create():
+    productos = db.session.query(Producto).order_by(Producto.nombre.asc()).all()
+    proveedores = db.session.query(Proveedor).order_by(Proveedor.nombre.asc()).all()
+    if request.method == "POST":
+        producto_id = request.form.get("producto_id")
+        proveedor_id = request.form.get("proveedor_id")
+        numero_documento=request.form.get("numero_albaran", "").strip() or None
+        fecha_entrada = _parse_date_yyyy_mm_dd(request.form.get("fecha_entrada"))
+        cantidad = _to_decimal(request.form.get("cantidad"))
+        precio_sin_iva = _to_decimal(request.form.get("precio_sin_iva"))
+        porcentaje_iva = _to_decimal(request.form.get("porcentaje_iva"))
+        descuento = _to_decimal(request.form.get("descuento"))
+        observaciones = request.form.get("observaciones", "").strip() or None
+
+        if not producto_id or not cantidad:
+            flash("Producto y cantidad son obligatorios", "warning")
+            return redirect(url_for("admin.entradas_create"))
+
+        precio_con_iva = _calc_precio_con_iva(precio_sin_iva, porcentaje_iva, descuento)
+
+        e = RegistroEntradaProducto(
+            producto_id=int(producto_id),
+            proveedor_id=int(proveedor_id) if proveedor_id else None,
+            numero_albaran=numero_albaran,
+            fecha_entrada=fecha_entrada,
+            cantidad=cantidad,
+            precio_sin_iva=precio_sin_iva,
+            porcentaje_iva=porcentaje_iva,
+            descuento=descuento,
+            precio_con_iva=precio_con_iva,
+            observaciones=observaciones
+        )
+        db.session.add(e); db.session.commit()
+        flash("Entrada registrado", "success")
+        return redirect(url_for("admin.entradas_list"))
+
+    return render_template("entradas_form.html", productos=productos, proveedores=proveedores, item=None)
+
+@admin_bp.route("/entradas/<int:eid>/editar", methods=["GET", "POST"])
+@_auth_required
+def entradas_edit(eid):
+    e = db.session.get(RegistroEntradaProducto, eid)
+    if not e:
+        flash("Entrada no encontrada", "danger")
+        return redirect(url_for("admin.entradas_list"))
+    productos = db.session.query(Producto).order_by(Producto.nombre.asc()).all()
+    proveedores = db.session.query(Proveedor).order_by(Proveedor.nombre.asc()).all()
+
+    if request.method == "POST":
+        if request.form.get("producto_id"): e.producto_id = int(request.form.get("producto_id"))
+        e.proveedor_id = int(request.form.get("proveedor_id")) if request.form.get("proveedor_id") else None
+        e.numero_documento=request.form.get("numero_albaran", "").strip() or None
+
+        fecha_entrada_parsed = _parse_date_yyyy_mm_dd(request.form.get("fecha_entrada"))
+        if fecha_entrada_parsed: e.fecha_entrada = fecha_entrada_parsed
+
+        cant = _to_decimal(request.form.get("cantidad"))
+        if cant is not None: e.cantidad = cant
+
+        e.precio_sin_iva = _to_decimal(request.form.get("precio_sin_iva"))
+        e.porcentaje_iva = _to_decimal(request.form.get("porcentaje_iva"))
+        e.descuento = _to_decimal(request.form.get("descuento"))
+        e.precio_con_iva = _calc_precio_con_iva(e.precio_sin_iva, e.porcentaje_iva, e.descuento)
+        e.observaciones = request.form.get("observaciones", "").strip() or None
+
+        db.session.commit()
+        flash("Entrada actualizada", "success")
+        return redirect(url_for("admin.entradas_list"))
+
+    return render_template("entradas_form.html", productos=productos, proveedores=proveedores, item=e)
+
+@admin_bp.route("/entradas/<int:eid>/eliminar", methods=["POST"])
+@_auth_required
+def entradas_delete(eid):
+    e = db.session.get(RegistroEntradaProducto, eid)
+    if not e:
+        flash("Entrada no encontrada", "danger")
+        return redirect(url_for("admin.entradas_list"))
+    db.session.delete(e); db.session.commit()
+    flash("Entrada eliminada", "info")
+    return redirect(url_for("admin.entradas_list"))
+
+# -------- Salidas --------
+@admin_bp.route("/salidas")
+@_auth_required
+def salidas_list():
+    q = db.session.query(RegistroSalidaProducto).order_by(RegistroSalidaProducto.id.desc())
+    f_desde = request.args.get("desde"); f_hasta = request.args.get("hasta")
+    d = _parse_date_yyyy_mm_dd(f_desde); h = _parse_date_yyyy_mm_dd(f_hasta)
+    if d: q = q.filter(RegistroSalidaProducto.fecha_salida >= d)
+    if h: q = q.filter(RegistroSalidaProducto.fecha_salida <= h)
+    salidas = q.limit(1000).all()
+    productos = db.session.query(Producto).order_by(Producto.nombre.asc()).all()
+    usuarios = db.session.query(Usuario).order_by(Usuario.id.desc()).all()
+    return render_template("salidas.html", salidas=salidas, productos=productos, usuarios=usuarios,
+                           desde=f_desde or "", hasta=f_hasta or "")
+
+@admin_bp.route("/salidas/nuevo", methods=["GET", "POST"])
+@_auth_required
+def salidas_create():
+    productos = db.session.query(Producto).order_by(Producto.nombre.asc()).all()
+    usuarios = db.session.query(Usuario).order_by(Usuario.id.desc()).all()
+    if request.method == "POST":
+        producto_id = request.form.get("producto_id")
+        cantidad = _to_decimal(request.form.get("cantidad"))
+        fecha_salida = _parse_date_yyyy_mm_dd(request.form.get("fecha_salida"))
+        usuario_id = request.form.get("usuario_id")
+
+        if not producto_id or not cantidad:
+            flash("Producto y cantidad son obligatorios", "warning")
+            return redirect(url_for("admin.salidas_create"))
+
+        s = RegistroSalidaProducto(
+            producto_id=int(producto_id),
+            cantidad=cantidad,
+            fecha_salida=fecha_salida,
+            usuario_id=int(usuario_id) if usuario_id else None,
+        )
+        db.session.add(s); db.session.commit()
+        flash("Salida registrada", "success")
+        return redirect(url_for("admin.salidas_list"))
+
+    return render_template("salidas_form.html", productos=productos, usuarios=usuarios, item=None)
+
+@admin_bp.route("/salidas/<int:sid>/editar", methods=["GET", "POST"])
+@_auth_required
+def salidas_edit(sid):
+    s = db.session.get(RegistroSalidaProducto, sid)
+    if not s:
+        flash("Salida no encontrada", "danger")
+        return redirect(url_for("admin.salidas_list"))
+    productos = db.session.query(Producto).order_by(Producto.nombre.asc()).all()
+    usuarios = db.session.query(Usuario).order_by(Usuario.id.desc()).all()
+
+    if request.method == "POST":
+        if request.form.get("producto_id"): s.producto_id = int(request.form.get("producto_id"))
+        cant = _to_decimal(request.form.get("cantidad"))
+        if cant is not None: s.cantidad = cant
+        fecha_parsed = _parse_date_yyyy_mm_dd(request.form.get("fecha_salida"))
+        if fecha_parsed: s.fecha_salida = fecha_parsed
+        if "usuario_id" in request.form: s.usuario_id = int(request.form.get("usuario_id")) if request.form.get("usuario_id") else None
+        db.session.commit()
+        flash("Salida actualizada", "success")
+        return redirect(url_for("admin.salidas_list"))
+
+    return render_template("salidas_form.html", productos=productos, usuarios=usuarios, item=s)
+
+@admin_bp.route("/salidas/<int:sid>/eliminar", methods=["POST"])
+@_auth_required
+def salidas_delete(sid):
+    s = db.session.get(RegistroSalidaProducto, sid)
+    if not s:
+        flash("Salida no encontrada", "danger")
+        return redirect(url_for("admin.salidas_list"))
+    db.session.delete(s); db.session.commit()
+    flash("Salida eliminada", "info")
+    return redirect(url_for("admin.salidas_list"))
+
+# -------- Maquinaria --------
+@admin_bp.route("/maquinaria")
+@_auth_required
+def maquinaria_list():
+    q = db.session.query(Maquinaria).order_by(Maquinaria.id.desc())
+    search = request.args.get("q")
+    if search:
+        like = f"%{search}%"
+        filtros = []
+        if hasattr(Maquinaria, "nombre"):  filtros.append(Maquinaria.nombre.ilike(like))
+        if hasattr(Maquinaria, "marca"):   filtros.append(Maquinaria.marca.ilike(like))
+        if hasattr(Maquinaria, "modelo"):  filtros.append(Maquinaria.modelo.ilike(like))
+        if filtros: q = q.filter(or_(*filtros))
+    items = q.limit(1000).all()
+    return render_template("maquinaria.html", maquinas=items, search=search or "")
+
+@admin_bp.route("/maquinaria/nuevo", methods=["GET", "POST"])
+@_auth_required
+def maquinaria_create():
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        if not nombre and hasattr(Maquinaria, "nombre"):
+            flash("El nombre es obligatorio", "warning")
+            return redirect(url_for("admin.maquinaria_create"))
+
+        m = Maquinaria()
+        if hasattr(Maquinaria, "nombre"):         m.nombre = nombre or None
+        if hasattr(Maquinaria, "marca"):          m.marca = request.form.get("marca", "").strip() or None
+        if hasattr(Maquinaria, "modelo"):         m.modelo = request.form.get("modelo", "").strip() or None
+        if hasattr(Maquinaria, "numero_serie"):   m.numero_serie = request.form.get("numero_serie", "").strip() or None
+        if hasattr(Maquinaria, "serie") and not hasattr(Maquinaria, "numero_serie"):
+            m.serie = request.form.get("numero_serie", "").strip() or None
+        if hasattr(Maquinaria, "fecha_garantia"):
+            m.fecha_garantia = _parse_date_yyyy_mm_dd(request.form.get("fecha_garantia"))
+        if hasattr(Maquinaria, "garantia") and not hasattr(Maquinaria, "fecha_garantia"):
+            m.garantia = _parse_date_yyyy_mm_dd(request.form.get("fecha_garantia"))
+        if hasattr(Maquinaria, "observaciones"):
+            m.observaciones = request.form.get("observaciones", "").strip() or None
+
+        db.session.add(m); db.session.commit()
+        flash("Maquinaria creada", "success")
+        return redirect(url_for("admin.maquinaria_list"))
+
+    return render_template("maquinaria_form.html", item=None)
+
+@admin_bp.route("/maquinaria/<int:mid>/editar", methods=["GET", "POST"])
+@_auth_required
+def maquinaria_edit(mid):
+    m = db.session.get(Maquinaria, mid)
+    if not m:
+        flash("Maquinaria no encontrada", "danger")
+        return redirect(url_for("admin.maquinaria_list"))
+
+    if request.method == "POST":
+        if hasattr(Maquinaria, "nombre"): m.nombre = request.form.get("nombre", "").strip() or m.nombre
+        if hasattr(Maquinaria, "marca"): m.marca = request.form.get("marca", "").strip() or None
+        if hasattr(Maquinaria, "modelo"): m.modelo = request.form.get("modelo", "").strip() or None
+        if hasattr(Maquinaria, "numero_serie"): m.numero_serie = request.form.get("numero_serie", "").strip() or None
+        if hasattr(Maquinaria, "serie") and not hasattr(Maquinaria, "numero_serie"):
+            m.serie = request.form.get("numero_serie", "").strip() or None
+        if hasattr(Maquinaria, "fecha_garantia"):
+            parsed = _parse_date_yyyy_mm_dd(request.form.get("fecha_garantia"))
+            if parsed: m.fecha_garantia = parsed
+        if hasattr(Maquinaria, "garantia") and not hasattr(Maquinaria, "fecha_garantia"):
+            parsed = _parse_date_yyyy_mm_dd(request.form.get("fecha_garantia"))
+            if parsed: m.garantia = parsed
+        if hasattr(Maquinaria, "observaciones"):
+            m.observaciones = request.form.get("observaciones", "").strip() or None
+
+        db.session.commit()
+        flash("Maquinaria actualizada", "success")
+        return redirect(url_for("admin.maquinaria_list"))
+
+    return render_template("maquinaria_form.html", item=m)
+
+@admin_bp.route("/maquinaria/<int:mid>/eliminar", methods=["POST"])
+@_auth_required
+def maquinaria_delete(mid):
+    m = db.session.get(Maquinaria, mid)
+    if not m:
+        flash("Maquinaria no encontrada", "danger")
+        return redirect(url_for("admin.maquinaria_list"))
+    db.session.delete(m); db.session.commit()
+    flash("Maquinaria eliminada", "info")
+    return redirect(url_for("admin.maquinaria_list"))
+
+# -------- Usuarios --------
+ROLES_SUGERIDOS = ["administrador", "empleado", "pintor", "limpiador", "mantenimiento", "almacen"]
+
+@admin_bp.route("/usuarios")
+@_auth_required
+def usuarios_list():
+    q = db.session.query(Usuario).order_by(Usuario.id.desc())
+    search = request.args.get("q")
+    if search:
+        like = f"%{search}%"
+        filtros = []
+        if hasattr(Usuario, "nombre"): filtros.append(Usuario.nombre.ilike(like))
+        if hasattr(Usuario, "email"):  filtros.append(Usuario.email.ilike(like))
+        if hasattr(Usuario, "rol"):    filtros.append(Usuario.rol.ilike(like))
+        if filtros: q = q.filter(or_(*filtros))
+    items = q.limit(1000).all()
+    return render_template("usuarios.html", usuarios=items, search=search or "", roles=ROLES_SUGERIDOS)
+
+@admin_bp.route("/usuarios/nuevo", methods=["GET", "POST"])
+@_auth_required
+def usuarios_create():
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip() or None
+        email  = request.form.get("email", "").strip() or None
+        rol    = (request.form.get("rol", "").strip() or "").lower() or None
+        password = request.form.get("password", "")
+
+        u = Usuario()
+        if hasattr(Usuario, "nombre"): u.nombre = nombre
+        if hasattr(Usuario, "email"):  u.email = email
+        if hasattr(Usuario, "rol"):    u.rol = rol
+        if password:
+            if hasattr(u, "set_password") and callable(getattr(u, "set_password")): u.set_password(password)
+            elif hasattr(Usuario, "password_hash"): u.password_hash = generate_password_hash(password)
+            elif hasattr(Usuario, "password"): u.password = password
+
+        db.session.add(u); db.session.commit()
+        flash("Usuario creado", "success")
+        return redirect(url_for("admin.usuarios_list"))
+
+    return render_template("usuarios_form.html", item=None, roles=ROLES_SUGERIDOS)
+
+@admin_bp.route("/usuarios/<int:uid>/editar", methods=["GET", "POST"])
+@_auth_required
+def usuarios_edit(uid):
+    u = db.session.get(Usuario, uid)
+    if not u:
+        flash("Usuario no encontrado", "danger")
+        return redirect(url_for("admin.usuarios_list"))
+
+    if request.method == "POST":
+        if hasattr(Usuario, "nombre"): u.nombre = request.form.get("nombre", "").strip() or u.nombre
+        if hasattr(Usuario, "email"):  u.email = request.form.get("email", "").strip() or u.email
+        if hasattr(Usuario, "rol"):
+            rol = (request.form.get("rol", "").strip() or "").lower()
+            u.rol = rol or u.rol
+
+        password = request.form.get("password", "")
+        if password:
+            if hasattr(u, "set_password") and callable(getattr(u, "set_password")): u.set_password(password)
+            elif hasattr(Usuario, "password_hash"): u.password_hash = generate_password_hash(password)
+            elif hasattr(Usuario, "password"): u.password = password
+
+        db.session.commit()
+        flash("Usuario actualizado", "success")
+        return redirect(url_for("admin.usuarios_list"))
+
+    return render_template("usuarios_form.html", item=u, roles=ROLES_SUGERIDOS)
+
+@admin_bp.route("/usuarios/<int:uid>/eliminar", methods=["POST"])
+@_auth_required
+def usuarios_delete(uid):
+    u = db.session.get(Usuario, uid)
+    if not u:
+        flash("Usuario no encontrado", "danger")
+        return redirect(url_for("admin.usuarios_list"))
+    db.session.delete(u); db.session.commit()
+    flash("Usuario eliminado", "info")
+    return redirect(url_for("admin.usuarios_list"))

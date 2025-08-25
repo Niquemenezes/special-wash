@@ -1,34 +1,28 @@
-const API = process.env.REACT_APP_BACKEND_URL || "http://localhost:5000";
+const API = process.env.REACT_APP_BACKEND_URL || "";
 
-export const getToken = () => sessionStorage.getItem("token") || "";
-
-export async function apiFetch(path, { method="GET", body=null, auth=true } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  if (auth) {
-    const t = getToken();
-    if (t) headers.Authorization = `Bearer ${t}`;
-  }
+async function jsonFetch(path, { method = "GET", body } = {}) {
   const res = await fetch(`${API}${path}`, {
     method,
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : null,
+    credentials: "include",
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${res.status} ${text}`);
+    const text = await res.text().catch(() => "");
+    const err = new Error(`${res.status} ${text}`);
+    err.status = res.status;
+    throw err;
   }
-  return res.headers.get("content-type")?.includes("application/json")
-    ? res.json()
-    : res.text();
+  return res.json();
 }
 
-export const loginAdmin = () =>
-  apiFetch("/api/auth/seed-admin", { method:"POST", auth:false })
-    .catch(()=>{})
-    .then(()=> apiFetch("/api/auth/login", {
-      method:"POST", auth:false,
-      body:{ email:"admin@specialwash.local", password:"admin12345" }
-    }));
-
-export const getProductos = () => apiFetch("/api/productos");
-export const getProveedores = () => apiFetch("/api/proveedores");
+export async function authMe() {
+  return jsonFetch("/api/auth/me");
+}
+export async function loginAdmin({ email, password, rol = "administrador" }) {
+  return jsonFetch("/api/auth/login", { method: "POST", body: { email, password, rol } });
+}
+export async function logoutApi() {
+  return jsonFetch("/api/auth/logout", { method: "POST" });
+}
+export { jsonFetch };

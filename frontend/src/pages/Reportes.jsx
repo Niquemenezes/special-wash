@@ -34,7 +34,12 @@ export default function Reportes() {
     }
   };
 
-  useEffect(() => { consultar(); /* auto-run al abrir */ }, []);
+useEffect(() => {
+  consultar();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+
 
   const totalSin = data?.totales?.sin_iva ?? 0;
   const totalCon = data?.totales?.con_iva ?? 0;

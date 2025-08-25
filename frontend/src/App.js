@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./layout/Layout";
 import Dashboard from "./pages/Dashboard";
@@ -8,30 +8,24 @@ import Usuarios from "./pages/Usuarios";
 import Maquinaria from "./pages/Maquinaria";
 import Entradas from "./pages/Entradas";
 import Salidas from "./pages/Salidas";
-import { loginAdmin } from "./api";
 import Reportes from "./pages/Reportes";
+import { loginAdmin } from "./api";
 
 export default function App() {
   const [token, setToken] = useState(sessionStorage.getItem("token") || "");
 
-  // Usa useCallback para memoizar la función login
-  const login = useCallback(async () => {
+  const login = async () => {
     const data = await loginAdmin();
     sessionStorage.setItem("token", data.token);
     setToken(data.token);
-  }, []);
-
-  const logout = () => { 
-    sessionStorage.removeItem("token"); 
-    setToken(""); 
   };
+  const logout = () => { sessionStorage.removeItem("token"); setToken(""); };
 
-  // useEffect corregido con dependencias adecuadas
-  useEffect(() => { 
-    if (!token) {
-      login().catch(() => {});
-    }
-  }, [token, login]); // Ahora incluye token y login como dependencias
+  useEffect(() => {
+  if (!token) login().catch(()=>{});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [token]);
+
 
   return (
     <BrowserRouter>

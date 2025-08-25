@@ -44,7 +44,7 @@ export default function Entradas() {
   const open = () => { setForm(empty); setShow(true); };
 
   // —— CÁLCULOS EN VIVO ——
-  const toNum = (v) => (v === "" || v === null || v === undefined) ? "" : Number(v);
+  
 
   const recalcFromBruto = (next) => {
     const bruto = Number(next.precio_bruto_sin_iva || 0);

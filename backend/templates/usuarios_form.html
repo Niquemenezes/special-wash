@@ -1,0 +1,38 @@
+{% extends "admin/_base.html" %}
+{% block content %}
+<h3 class="mb-3">{{ 'Editar usuario' if item else 'Nuevo usuario' }}</h3>
+
+<form method="post">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">Nombre</label>
+      <input type="text" name="nombre" class="form-control" value="{{ item.nombre if item else '' }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Email</label>
+      <input type="email" name="email" class="form-control" value="{{ item.email if item else '' }}">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Rol</label>
+      <select name="rol" class="form-select">
+        <option value="">— Selecciona —</option>
+        {% for r in roles %}
+        <option value="{{ r }}" {% if item and (item.rol or item.role) == r %}selected{% endif %}>{{ r }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Contraseña (solo si quieres cambiarla)</label>
+      <input type="password" name="password" class="form-control">
+      <div class="form-text">Se actualizará solo si rellenas este campo.</div>
+    </div>
+
+    <div class="col-12 d-flex gap-2">
+      <button type="submit" class="btn btn-primary">{{ 'Guardar cambios' if item else 'Crear' }}</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('admin.usuarios_list') }}">Volver</a>
+    </div>
+  </div>
+</form>
+{% endblock %}
