@@ -1,0 +1,23 @@
+{% extends "admin/_base.html" %}
+{% block content %}
+<h3 class="mb-3">Usuarios</h3>
+<div class="table-responsive">
+  <table class="table table-sm table-striped align-middle">
+    <thead class="table-dark">
+      <tr>
+        <th>ID</th><th>Nombre</th><th>Email</th><th>Rol</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in usuarios %}
+      <tr>
+        <td>{{ u.id }}</td>
+        <td>{{ u.nombre or u.fullname }}</td>
+        <td>{{ u.email }}</td>
+        <td>{{ (u.rol or u.role) | default('-', true) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

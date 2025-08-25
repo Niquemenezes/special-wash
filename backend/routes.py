@@ -1,0 +1,487 @@
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from werkzeug.security import generate_password_hash, check_password_hash
+from .db import db
+from .models import (
+    Usuario, Proveedor, Producto,
+    RegistroEntradaProducto, RegistroSalidaProducto,
+    Maquinaria, serialize_list
+)
+import json
+from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, timedelta
+
+
+api_bp = Blueprint("api", __name__)
+
+# -------- Helpers de auth/roles --------
+def _current_identity():
+    """Nuestra app guardó el identity como JSON string, lo parseamos."""
+    ident = get_jwt_identity()
+    try:
+        return json.loads(ident) if isinstance(ident, str) else ident
+    except Exception:
+        return {"sub": None, "rol": None}
+
+def admin_required(fn):
+    from functools import wraps
+    @wraps(fn)
+    @jwt_required()
+    def wrapper(*args, **kwargs):
+        ident = _current_identity()
+        if ident.get("rol") != "administrador":
+            return jsonify(msg="Solo administradores"), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+@api_bp.get("/ping")
+def ping():
+    return jsonify(pong=True)
+
+# -------- AUTH --------
+@api_bp.post("/auth/seed-admin")
+def seed_admin():
+    if Usuario.query.filter_by(email="admin@specialwash.local").first():
+        return jsonify(msg="Admin ya existe"), 200
+    admin = Usuario(
+        nombre="Admin",
+        email="admin@specialwash.local",
+        password_hash=generate_password_hash("admin12345"),
+        rol="administrador",
+    )
+    db.session.add(admin); db.session.commit()
+    return jsonify(msg="Admin creado"), 201
+
+@api_bp.post("/auth/login")
+def login():
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    user = Usuario.query.filter_by(email=email).first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify(msg="Email o contraseña incorrectos"), 401
+    identity = json.dumps({"sub": str(user.id), "rol": user.rol})
+    token = create_access_token(identity=identity)
+    return jsonify(token=token, user=user.serialize())
+
+# -------- USUARIOS (solo admin) --------
+@api_bp.get("/usuarios")
+@admin_required
+def usuarios_list():
+    items = Usuario.query.order_by(Usuario.nombre).all()
+    return jsonify(serialize_list(items))
+
+@api_bp.post("/usuarios")
+@admin_required
+def usuarios_create():
+    data = request.get_json() or {}
+    nombre = data["nombre"]
+    email = data["email"].strip().lower()
+    password = data.get("password", "empleado123")
+    rol = data.get("rol", "empleado")
+    if Usuario.query.filter_by(email=email).first():
+        return jsonify(msg="El email ya existe"), 400
+    u = Usuario(
+        nombre=nombre,
+        email=email,
+        password_hash=generate_password_hash(password),
+        rol=rol
+    )
+    db.session.add(u); db.session.commit()
+    return jsonify(u.serialize()), 201
+
+@api_bp.put("/usuarios/<int:uid>")
+@admin_required
+def usuarios_update(uid):
+    u = Usuario.query.get_or_404(uid)
+    data = request.get_json() or {}
+    if "nombre" in data: u.nombre = data["nombre"]
+    if "email" in data:
+        email = data["email"].strip().lower()
+        if Usuario.query.filter(Usuario.email == email, Usuario.id != uid).first():
+            return jsonify(msg="Email ya en uso"), 400
+        u.email = email
+    if "rol" in data: u.rol = data["rol"]
+    if "password" in data and data["password"]:
+        u.password_hash = generate_password_hash(data["password"])
+    db.session.commit()
+    return jsonify(u.serialize())
+
+@api_bp.delete("/usuarios/<int:uid>")
+@admin_required
+def usuarios_delete(uid):
+    u = Usuario.query.get_or_404(uid)
+    db.session.delete(u); db.session.commit()
+    return jsonify(msg="Usuario eliminado")
+
+# -------- PROVEEDORES --------
+@api_bp.get("/proveedores")
+@jwt_required()
+def proveedores_list():
+    items = Proveedor.query.order_by(Proveedor.nombre).all()
+    return jsonify(serialize_list(items))
+
+@api_bp.post("/proveedores")
+@admin_required
+def proveedores_create():
+    data = request.get_json() or {}
+    p = Proveedor(
+        nombre=data["nombre"],
+        contacto=data.get("contacto"),
+        telefono=data.get("telefono"),
+    )
+    db.session.add(p); db.session.commit()
+    return jsonify(p.serialize()), 201
+
+@api_bp.put("/proveedores/<int:pid>")
+@admin_required
+def proveedores_update(pid):
+    p = Proveedor.query.get_or_404(pid)
+    data = request.get_json() or {}
+    if "nombre" in data: p.nombre = data["nombre"]
+    if "contacto" in data: p.contacto = data["contacto"]
+    if "telefono" in data: p.telefono = data["telefono"]
+    db.session.commit()
+    return jsonify(p.serialize())
+
+@api_bp.delete("/proveedores/<int:pid>")
+@admin_required
+def proveedores_delete(pid):
+    p = Proveedor.query.get_or_404(pid)
+    db.session.delete(p); db.session.commit()
+    return jsonify(msg="Proveedor eliminado")
+
+# -------- PRODUCTOS --------
+@api_bp.get("/productos")
+@jwt_required()
+def productos_list():
+    items = Producto.query.order_by(Producto.nombre).all()
+    return jsonify(serialize_list(items))
+
+@api_bp.post("/productos")
+@admin_required
+def productos_create():
+    data = request.get_json() or {}
+    
+    # Validaciones
+    if not data.get("nombre"):
+        return jsonify(msg="Nombre es requerido"), 400
+    
+    stock_minimo = int(data.get("stock_minimo", 0))
+    stock_actual = int(data.get("stock_actual", 0))
+    
+    if stock_minimo < 0 or stock_actual < 0:
+        return jsonify(msg="Los valores de stock no pueden ser negativos"), 400
+    
+    prod = Producto(
+        nombre=data["nombre"],
+        categoria=data.get("categoria"),
+        stock_minimo=stock_minimo,
+        stock_actual=stock_actual,
+    )
+    db.session.add(prod)
+    db.session.commit()
+    return jsonify(prod.serialize()), 201
+
+@api_bp.put("/productos/<int:pid>")
+@admin_required
+def productos_update(pid):
+    prod = Producto.query.get_or_404(pid)
+    data = request.get_json() or {}
+    for field in ["nombre","categoria","stock_minimo","stock_actual"]:
+        if field in data:
+            setattr(prod, field, int(data[field]) if field in ["stock_minimo","stock_actual"] else data[field])
+    db.session.commit()
+    return jsonify(prod.serialize())
+
+@api_bp.delete("/productos/<int:pid>")
+@admin_required
+def productos_delete(pid):
+    prod = Producto.query.get_or_404(pid)
+    db.session.delete(prod); db.session.commit()
+    return jsonify(msg="Producto eliminado")
+
+# -------- ENTRADAS / SALIDAS --------
+@api_bp.post("/registro-entrada")
+@admin_required
+def registrar_entrada():
+    from decimal import Decimal, ROUND_HALF_UP
+
+    def d(x):
+        if x in (None, ""): return None
+        try: return Decimal(str(x))
+        except: return None
+
+    data = request.get_json() or {}
+    prod = Producto.query.get_or_404(int(data["producto_id"]))
+    cantidad = int(data["cantidad"])
+
+    # Documento
+    tipo_documento = (data.get("tipo_documento") or "").lower() or None
+    numero_documento = data.get("numero_documento") or None
+
+    # Importes
+    bruto = d(data.get("precio_bruto_sin_iva"))
+    desc_pct = d(data.get("descuento_porcentaje"))
+    desc_imp = d(data.get("descuento_importe"))
+    neto_sin = d(data.get("precio_sin_iva"))
+    iva_pct  = d(data.get("iva_porcentaje"))
+    con_iva  = d(data.get("precio_con_iva"))
+
+    # 1) Si viene BRUTO + descuentos, calcula NETO sin IVA
+    if neto_sin is None and bruto is not None:
+        neto_sin = bruto
+        if desc_pct is not None:
+            neto_sin = neto_sin - (bruto * (desc_pct / Decimal(100)))
+        if desc_imp is not None:
+            neto_sin = neto_sin - desc_imp
+        neto_sin = neto_sin.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    # 2) Si falta CON IVA pero tenemos NETO + IVA%, calcúlalo
+    if con_iva is None and neto_sin is not None and iva_pct is not None:
+        con_iva = (neto_sin * (Decimal(1) + iva_pct / Decimal(100))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    # 3) Si tenemos CON IVA + IVA% pero no NETO, despeja
+    if neto_sin is None and con_iva is not None and iva_pct is not None and (Decimal(1) + iva_pct/Decimal(100)) != 0:
+        neto_sin = (con_iva / (Decimal(1) + iva_pct / Decimal(100))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    # Guarda
+    entrada = RegistroEntradaProducto(
+        producto_id=prod.id,
+        proveedor_id=data.get("proveedor_id"),
+        cantidad=cantidad,
+        tipo_documento=tipo_documento,
+        numero_documento=numero_documento,
+        precio_bruto_sin_iva=bruto,
+        descuento_porcentaje=desc_pct,
+        descuento_importe=desc_imp,
+        precio_sin_iva=neto_sin,
+        iva_porcentaje=iva_pct,
+        precio_con_iva=con_iva,
+    )
+
+    # Actualiza stock
+    prod.stock_actual = (prod.stock_actual or 0) + cantidad
+    db.session.add(entrada); db.session.commit()
+
+    return jsonify({
+        "msg": "Entrada registrada",
+        "stock_actual": prod.stock_actual,
+        "entrada": entrada.serialize(),
+    }), 201
+
+# ---- ENTRADAS (historial) ----
+@api_bp.get("/registro-entrada")
+@jwt_required()
+def entradas_list():
+    items = RegistroEntradaProducto.query.order_by(RegistroEntradaProducto.fecha_entrada.desc()).all()
+    return jsonify(serialize_list(items))
+
+
+@api_bp.post("/registro-salida")
+@admin_required
+def registrar_salida():
+    try:
+        data = request.get_json() or {}
+        prod = Producto.query.get_or_404(int(data["producto_id"]))
+        cantidad = int(data["cantidad"])
+        
+        if cantidad <= 0:
+            return jsonify(msg="La cantidad debe ser mayor a 0"), 400
+            
+        if prod.stock_actual < cantidad:
+            return jsonify(msg="Stock insuficiente"), 400
+        
+        # Usar transacción para asegurar consistencia
+        with db.session.begin_nested():
+            salida = RegistroSalidaProducto(
+                producto_id=prod.id, 
+                cantidad=cantidad
+            )
+            prod.stock_actual -= cantidad
+            db.session.add(salida)
+        
+        db.session.commit()
+        return jsonify(
+            msg="Salida registrada", 
+            stock_actual=prod.stock_actual, 
+            salida=salida.serialize()
+        ), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(msg=f"Error al registrar salida: {str(e)}"), 500
+
+# ---- SALIDAS (historial) ----
+@api_bp.get("/registro-salida")
+@jwt_required()
+def salidas_list():
+    items = RegistroSalidaProducto.query.order_by(RegistroSalidaProducto.fecha_salida.desc()).all()
+    return jsonify(serialize_list(items))
+
+# -------- MAQUINARIA --------
+@api_bp.get("/maquinaria")
+@jwt_required()
+def maquinaria_list():
+    items = Maquinaria.query.order_by(Maquinaria.nombre).all()
+    return jsonify(serialize_list(items))
+
+@api_bp.post("/maquinaria")
+@admin_required
+def maquinaria_create():
+    data = request.get_json() or {}
+    m = Maquinaria(
+        nombre=data["nombre"],
+        marca=data.get("marca"),
+        modelo=data.get("modelo"),
+        numero_serie=data.get("numero_serie"),
+        estado=data.get("estado","operativa"),
+        fecha_compra=_parse_date(data.get("fecha_compra")),
+        ultima_revision=_parse_date(data.get("ultima_revision")),
+        proveedor_id=data.get("proveedor_id"),
+    )
+    db.session.add(m); db.session.commit()
+    return jsonify(m.serialize()), 201
+
+@api_bp.put("/maquinaria/<int:mid>")
+@admin_required
+def maquinaria_update(mid):
+    m = Maquinaria.query.get_or_404(mid)
+    data = request.get_json() or {}
+    for field in ["nombre","marca","modelo","numero_serie","estado","proveedor_id"]:
+        if field in data:
+            setattr(m, field, data[field])
+    if "fecha_compra" in data:
+        m.fecha_compra = _parse_date(data["fecha_compra"])
+    if "ultima_revision" in data:
+        m.ultima_revision = _parse_date(data["ultima_revision"])
+    db.session.commit()
+    return jsonify(m.serialize())
+
+@api_bp.delete("/maquinaria/<int:mid>")
+@admin_required
+def maquinaria_delete(mid):
+    m = Maquinaria.query.get_or_404(mid)
+    db.session.delete(m); db.session.commit()
+    return jsonify(msg="Maquina eliminada")
+
+# --- util fechas ---
+def _parse_date(s):
+    if not s: 
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        # Log the error or handle appropriately
+        return None
+    
+
+
+# -------- REPORTES --------
+
+def _to_decimal(x):
+    if x is None or x == "":
+        return None
+    try:
+        return Decimal(str(x))
+    except Exception:
+        return None
+
+def _importe_con_iva(row):
+    # row es RegistroEntradaProducto
+    con = _to_decimal(row.precio_con_iva)
+    if con is not None:
+        return con
+    sin = _to_decimal(row.precio_sin_iva)
+    iva = _to_decimal(row.iva_porcentaje)
+    if sin is not None and iva is not None:
+        return (sin * (Decimal(1) + iva / Decimal(100))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return Decimal("0.00")
+
+def _importe_sin_iva(row):
+    sin = _to_decimal(row.precio_sin_iva)
+    if sin is not None:
+        return sin.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    con = _to_decimal(row.precio_con_iva)
+    iva = _to_decimal(row.iva_porcentaje)
+    if con is not None and iva is not None and (Decimal(1) + iva/Decimal(100)) != 0:
+        return (con / (Decimal(1) + iva / Decimal(100))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return Decimal("0.00")
+
+@api_bp.get("/reportes/gasto-productos")
+@jwt_required()
+def reporte_gasto_productos():
+    """
+    Query params:
+      - desde: YYYY-MM-DD (incluido)
+      - hasta: YYYY-MM-DD (incluido)
+      - producto_id: int (opcional)
+    Respuesta:
+      {
+        "desde": "2025-01-01",
+        "hasta": "2025-08-31",
+        "producto_id": 3 | null,
+        "moneda": "EUR",
+        "totales": {"sin_iva": 123.45, "con_iva": 149.37},
+        "mensual": [{"mes":"2025-01","sin_iva":..,"con_iva":..}, ...]
+      }
+    """
+    desde_str = request.args.get("desde")
+    hasta_str = request.args.get("hasta")
+    producto_id = request.args.get("producto_id", type=int)
+
+    # rangos
+    try:
+        desde = datetime.strptime(desde_str, "%Y-%m-%d") if desde_str else None
+        hasta = datetime.strptime(hasta_str, "%Y-%m-%d") if hasta_str else None
+        # incluir día completo en 'hasta'
+        if hasta:
+            hasta = hasta + timedelta(days=1) - timedelta(seconds=1)
+    except Exception:
+        return jsonify(msg="Parámetros de fecha inválidos. Usa YYYY-MM-DD"), 400
+
+    q = RegistroEntradaProducto.query
+    if desde:
+        q = q.filter(RegistroEntradaProducto.fecha_entrada >= desde)
+    if hasta:
+        q = q.filter(RegistroEntradaProducto.fecha_entrada <= hasta)
+    if producto_id:
+        q = q.filter(RegistroEntradaProducto.producto_id == producto_id)
+    rows = q.order_by(RegistroEntradaProducto.fecha_entrada.asc()).all()
+
+    # Agrupar en Python para ser agnóstico de BD
+    from collections import defaultdict
+    mensual_sin = defaultdict(Decimal)  # "YYYY-MM" -> importe
+    mensual_con = defaultdict(Decimal)
+    total_sin = Decimal("0.00")
+    total_con = Decimal("0.00")
+
+    for r in rows:
+        mes = r.fecha_entrada.strftime("%Y-%m")
+        sin = _importe_sin_iva(r)
+        con = _importe_con_iva(r)
+        mensual_sin[mes] += sin
+        mensual_con[mes] += con
+        total_sin += sin
+        total_con += con
+
+    mensual = []
+    for mes in sorted(mensual_con.keys()):
+        mensual.append({
+            "mes": mes,
+            "sin_iva": float(mensual_sin[mes].quantize(Decimal("0.01"))),
+            "con_iva": float(mensual_con[mes].quantize(Decimal("0.01"))),
+        })
+
+    return jsonify({
+        "desde": desde_str,
+        "hasta": hasta_str,
+        "producto_id": producto_id,
+        "moneda": "EUR",
+        "totales": {
+            "sin_iva": float(total_sin.quantize(Decimal("0.01"))),
+            "con_iva": float(total_con.quantize(Decimal("0.01"))),
+        },
+        "mensual": mensual,
+    })
