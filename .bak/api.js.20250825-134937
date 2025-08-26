@@ -1,0 +1,38 @@
+const API = process.env.REACT_APP_BACKEND_URL || "";
+
+async function jsonFetch(path, { method = "GET", body, auth = true } = {}) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : null,
+    credentials: "include", // 🔒 manda/recibe la cookie JWT
+  });
+  // /auth/me devuelve 401 cuando no hay sesión -> lo tratamos como "no authed"
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = new Error(`${res.status} ${text}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// ---- AUTH ----
+export async function authMe() {
+  // { ok:true, user:{ id, email, rol } }
+  return jsonFetch("/api/auth/me");
+}
+
+export async function loginAdmin({ email, password, rol = "administrador" }) {
+  // setea cookie HttpOnly al hacer login
+  return jsonFetch("/api/auth/login", {
+    method: "POST",
+    body: { email, password, rol },
+  });
+}
+
+export async function logoutApi() {
+  return jsonFetch("/api/auth/logout", { method: "POST" });
+}
+
+export { jsonFetch }; // por si quieres reutilizar en páginas
