@@ -2,6 +2,11 @@ import os
 from flask import request, Response
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
+# arriba del todo ya tienes:
+# from flask_admin.contrib.sqla import ModelView
+# añade si no lo tuvieras:
+from sqlalchemy import func
+
 from wtforms import ValidationError
 from .db import db
 from .models import (

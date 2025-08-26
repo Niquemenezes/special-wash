@@ -1,6 +1,4 @@
 from flask import Blueprint, request, jsonify
-from .models import RegistroEntradaProducto, RegistroSalidaProducto, Producto
-from flask import jsonify
 from flask_jwt_extended import create_access_token, set_access_cookies, unset_jwt_cookies, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
 from .db import db
@@ -508,73 +506,3 @@ def reporte_gasto_productos():
         },
         "mensual": mensual,
     })
-
-
-
-@api_bp.route("/entradas", methods=["GET"])
-def get_entradas():
-    rows = (
-        db.session.query(
-            RegistroEntradaProducto.id,
-            RegistroEntradaProducto.producto_id,
-            RegistroEntradaProducto.fecha_entrada,
-            RegistroEntradaProducto.cantidad,
-            RegistroEntradaProducto.proveedor_id,
-            getattr(RegistroEntradaProducto, "numero_albaran").label("numero_albaran") if hasattr(RegistroEntradaProducto, "numero_albaran") else db.literal(None).label("numero_albaran"),
-            getattr(RegistroEntradaProducto, "precio_sin_iva").label("precio_sin_iva") if hasattr(RegistroEntradaProducto, "precio_sin_iva") else db.literal(None).label("precio_sin_iva"),
-            getattr(RegistroEntradaProducto, "porcentaje_iva").label("porcentaje_iva") if hasattr(RegistroEntradaProducto, "porcentaje_iva") else db.literal(None).label("porcentaje_iva"),
-            getattr(RegistroEntradaProducto, "valor_iva").label("valor_iva") if hasattr(RegistroEntradaProducto, "valor_iva") else db.literal(None).label("valor_iva"),
-            getattr(RegistroEntradaProducto, "precio_con_iva").label("precio_con_iva") if hasattr(RegistroEntradaProducto, "precio_con_iva") else db.literal(None).label("precio_con_iva"),
-            getattr(RegistroEntradaProducto, "descuento").label("descuento") if hasattr(RegistroEntradaProducto, "descuento") else db.literal(None).label("descuento"),
-            Producto.nombre.label("nombre_producto"),
-        )
-        .join(Producto, RegistroEntradaProducto.producto_id == Producto.id)
-        .order_by(RegistroEntradaProducto.id.desc())
-        .all()
-    )
-    data = []
-    for r in rows:
-        data.append({
-            "id": r.id,
-            "producto_id": r.producto_id,
-            "nombre_producto": r.nombre_producto,
-            "fecha_entrada": r.fecha_entrada.isoformat() if r.fecha_entrada else None,
-            "cantidad": r.cantidad,
-            "proveedor_id": r.proveedor_id,
-            "numero_albaran": getattr(r, "numero_albaran", None),
-            "precio_sin_iva": getattr(r, "precio_sin_iva", None),
-            "porcentaje_iva": getattr(r, "porcentaje_iva", None),
-            "valor_iva": getattr(r, "valor_iva", None),
-            "precio_con_iva": getattr(r, "precio_con_iva", None),
-            "descuento": getattr(r, "descuento", None),
-        })
-    return jsonify(data), 200
-
-@api_bp.route("/salidas", methods=["GET"])
-def get_salidas():
-    rows = (
-        db.session.query(
-            RegistroSalidaProducto.id,
-            RegistroSalidaProducto.producto_id,
-            RegistroSalidaProducto.fecha_salida,
-            RegistroSalidaProducto.cantidad,
-            getattr(RegistroSalidaProducto, "usuario_id").label("usuario_id") if hasattr(RegistroSalidaProducto, "usuario_id") else db.literal(None).label("usuario_id"),
-            getattr(RegistroSalidaProducto, "observaciones").label("observaciones") if hasattr(RegistroSalidaProducto, "observaciones") else db.literal(None).label("observaciones"),
-            Producto.nombre.label("nombre_producto"),
-        )
-        .join(Producto, RegistroSalidaProducto.producto_id == Producto.id)
-        .order_by(RegistroSalidaProducto.id.desc())
-        .all()
-    )
-    data = []
-    for r in rows:
-        data.append({
-            "id": r.id,
-            "producto_id": r.producto_id,
-            "nombre_producto": r.nombre_producto,
-            "fecha_salida": r.fecha_salida.isoformat() if r.fecha_salida else None,
-            "cantidad": r.cantidad,
-            "usuario_id": getattr(r, "usuario_id", None),
-            "observaciones": getattr(r, "observaciones", None),
-        })
-    return jsonify(data), 200
