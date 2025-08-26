@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
@@ -7,15 +8,23 @@ __pycache__/
 .env
 instance/
 *.sqlite3
-migrations/*.pyc
+*.db
 *.log
+
+# Flask/Packaging
 *.tgz
 *.tar.gz
-node_modules/
-frontend/node_modules/
-*.cache
 dist/
 build/
+
+# Node/React
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+*.cache
+
+# IDE/OS
 .vscode/
 .idea/
 .DS_Store
