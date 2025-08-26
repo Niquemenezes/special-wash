@@ -51,28 +51,13 @@ def _guess_ajax_field_for(model):
     return "id"
 
 def _make_dynamic_view(model):
-    mapper = sa_inspect(model)
-    rels_scalar = [r for r in mapper.relationships if not r.uselist]   # solo FK simples
-    rels_collection = [r for r in mapper.relationships if r.uselist]   # listas -> excluir del form
-
+    rels = sa_inspect(model).relationships
     ajax_refs = {}
-    def _column_names(m): return [c.key for c in sa_inspect(m).columns]
-    def _guess_ajax_field_for(m):
-        for f in ("nombre", "email", "detalle", "modelo"):
-            if f in _column_names(m):
-                return f
-        return "id"
-
-    for rel in rels_scalar:
+    for rel in rels:
         ajax_field = _guess_ajax_field_for(rel.mapper.class_)
         ajax_refs[rel.key] = {"fields": (ajax_field,)}
-
     class _DynView(SecureModelView):
-        # Autocomplete solo para FK válidas
         form_ajax_refs = ajax_refs
-        # Excluir del formulario las relaciones de colección (listas)
-        form_excluded_columns = [r.key for r in rels_collection]
-
     _DynView.__name__ = f"{model.__name__}AdminView"
     return _DynView
 

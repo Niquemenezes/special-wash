@@ -33,11 +33,6 @@ class Usuario(db.Model):
             # nunca expongas password_hash
         }
 
-    def __str__(self):
-        return (getattr(self, 'nombre', None)
-            or getattr(self, 'email', None)
-            or getattr(self, 'detalle', None)
-            or f"Usuario {self.id}")
 
 class Proveedor(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -52,12 +47,6 @@ class Proveedor(db.Model):
             "contacto": self.contacto,
             "telefono": self.telefono,
         }
-
-    def __str__(self):
-        return (getattr(self, 'nombre', None)
-            or getattr(self, 'email', None)
-            or getattr(self, 'detalle', None)
-            or f"Proveedor {self.id}")
 
 class Producto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -75,11 +64,9 @@ class Producto(db.Model):
             "stock_actual": self.stock_actual,
         }
 
-    def __str__(self):
-        return (getattr(self, 'nombre', None)
-            or getattr(self, 'email', None)
-            or getattr(self, 'detalle', None)
-            or f"Producto {self.id}")
+
+
+
 
 class RegistroEntradaProducto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
