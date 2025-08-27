@@ -3,9 +3,28 @@ services:
     name: specialwash-backend
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app --workers=2 --threads=4 --timeout=120
+    startCommand: gunicorn "backend.app:create_app" --workers=2 --bind 0.0.0.0:$PORT
+    plan: free
     envVars:
-      - key: FLASK_ENV
-        value: production
+      - key: FLASK_APP
+        value: backend.app:create_app
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: JWT_SECRET_KEY
+        sync: false
       - key: SECRET_KEY
-        generateValue: true
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+  - type: static
+    name: specialwash-frontend
+    buildCommand: cd frontend && npm install && npm run build
+    publishPath: frontend/build
+    envVars:
+      - key: REACT_APP_BACKEND_URL
+        fromService:
+          name: specialwash-backend
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
