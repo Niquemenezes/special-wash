@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: specialwash-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn src.app:app
+    envVars:
+      - key: FLASK_APP
+        value: src/app.py
+      - key: FLASK_APP_KEY
+        value: "any key works"
+      - key: FLASK_DEBUG
+        value: "1"
+      - key: DEBUG
+        value: "TRUE"
+      - key: DATABASE_URL
+        value: postgresql://specialwash_db_user:VFHHrxF9DOW9jEdNC1oo6gBGS7axiH1D@dpg-d1sclu95pdvs73abj8n0-a/specialwash_db
+
+  - type: web
+    name: specialwash-frontend
+    env: static
+    plan: free
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: REACT_APP_BACKEND_URL
+        value: https://specialwash-1.onrender.com
+      - key: BASENAME
+        value: /
