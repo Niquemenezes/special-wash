@@ -1,5 +1,7 @@
+// BASE del backend (Codespaces/Render). Sin barra final.
 const BASE = (process.env.REACT_APP_BACKEND_URL || "http://localhost:5000").replace(/\/$/, "");
 
+// Fetch JSON con cookies (JWT por cookie)
 export async function jsonFetch(path, { method = "GET", body, headers = {}, ...rest } = {}) {
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
 
@@ -21,15 +23,20 @@ export async function jsonFetch(path, { method = "GET", body, headers = {}, ...r
   return data;
 }
 
-export const apiFetch = jsonFetch;
-
+// ==== Auth ====
+// Si tu backend usa /api/login en vez de /api/auth/login, cambia la ruta aquí.
 export async function loginAdmin(creds) {
   if (!creds?.email || !creds?.password) throw new Error("Faltan credenciales");
   const email = String(creds.email).toLowerCase();
   const password = String(creds.password);
   const rol = (creds.rol || "administrador").toLowerCase();
-  // Ajusta /api/auth/login -> /api/login si tu backend usa otra ruta
   return jsonFetch("/api/auth/login", { method: "POST", body: { email, password, rol } });
 }
-export async function logoutApi() { return jsonFetch("/api/auth/logout", { method: "POST" }); }
-export async function authMe() { return jsonFetch("/api/auth/me"); }
+
+export async function logoutApi() {
+  return jsonFetch("/api/auth/logout", { method: "POST" });
+}
+
+export async function authMe() {
+  return jsonFetch("/api/auth/me");
+}

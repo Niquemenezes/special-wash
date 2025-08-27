@@ -14,7 +14,6 @@ export default function Panel(){
       </div>
       <hr />
       <p>Bienvenida/o, <b>{user?.email || "usuario"}</b></p>
-      {/* Aquí irán tus tarjetas: Productos, Proveedores, Entradas, Salidas, etc. */}
     </div>
   );
 }
