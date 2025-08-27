@@ -10,13 +10,10 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     (async () => {
       try {
-        const me = await authMe();   // 200 si hay cookie válida
+        const me = await authMe();
         setUser(me);
-      } catch {
-        setUser(null);
-      } finally {
-        setReady(true);
-      }
+      } catch { setUser(null); }
+      finally { setReady(true); }
     })();
   }, []);
 
@@ -25,12 +22,11 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
-  const value = { user, setUser, ready, logout };
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, setUser, ready, logout }}>{children}</AuthContext.Provider>;
 }
 
-export function useAuth(){
+export const useAuth = () => {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth debe usarse dentro de <AuthProvider>");
   return ctx;
-}
+};
