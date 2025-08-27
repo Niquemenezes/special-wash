@@ -1,39 +1,38 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { apiFetch } from "../api";
+// src/auth/AuthContext.jsx
+import { createContext, useContext, useEffect, useState } from "react";
+import { authMe, logoutApi } from "../api";
 
-const AuthCtx = createContext(null);
-export const useAuth = () => useContext(AuthCtx);
+const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [checking, setChecking] = useState(true);
+  const [ready, setReady] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const data = await apiFetch("/api/auth/me");
-      setUser(data.user || null);
-    } catch {
-      setUser(null);
-    } finally {
-      setChecking(false);
-    }
+  // Comprobar sesión al cargar (si la cookie JWT existe, el backend devuelve 200)
+  useEffect(() => {
+    (async () => {
+      try {
+        const me = await authMe();
+        setUser(me);
+      } catch {
+        setUser(null);
+      } finally {
+        setReady(true);
+      }
+    })();
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
-
-  const login = async ({ email, password, rol }) => {
-    await apiFetch("/api/auth/login", { method: "POST", body: { email, password, rol } });
-    await refresh(); // ahora la cookie está puesta
-  };
-
-  const logout = async () => {
-    await apiFetch("/api/auth/logout", { method: "POST" });
+  async function logout() {
+    try { await logoutApi(); } catch {}
     setUser(null);
-  };
+  }
 
-  return (
-    <AuthCtx.Provider value={{ user, checking, login, logout }}>
-      {children}
-    </AuthCtx.Provider>
-  );
+  const value = { user, setUser, ready, logout };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth debe usarse dentro de <AuthProvider>");
+  return ctx;
 }
