@@ -1,64 +1,23 @@
-import { useEffect, useState, useCallback } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Layout from "./layout/Layout";
-import Dashboard from "./pages/Dashboard";
-import Productos from "./pages/Productos";
-import Proveedores from "./pages/Proveedores";
-import Usuarios from "./pages/Usuarios";
-import Maquinaria from "./pages/Maquinaria";
-import Entradas from "./pages/Entradas";
-import Salidas from "./pages/Salidas";
-import Reportes from "./pages/Reportes";
+// src/App.jsx
+import { Routes, Route, Navigate } from "react-router-dom";
+import PrivateRoute from "./routes/PrivateRoute";
 import Login from "./pages/Login";
-import PrivateRoute from "./components/PrivateRoute";
-import { authMe, logoutApi } from "./api";
+import Panel from "./pages/Panel";
 
 export default function App() {
-  const [authed, setAuthed] = useState(false);
-  const [checking, setChecking] = useState(true);
-
-  const refreshAuth = useCallback(async () => {
-    try {
-      await authMe();
-      setAuthed(true);
-    } catch {
-      setAuthed(false);
-    } finally {
-      setChecking(false);
-    }
-  }, []);
-
-  useEffect(() => { refreshAuth(); }, [refreshAuth]);
-
-  const logout = async () => {
-    try { await logoutApi(); } catch {}
-    setAuthed(false);
-  };
-
   return (
-    <BrowserRouter>
-      <Layout onLogout={logout} isAuthed={authed}>
-        {checking ? (
-          <div className="text-center py-5">
-            <div className="spinner-border" role="status" />
-            <p className="mt-3 mb-0">Verificando sesión…</p>
-          </div>
-        ) : (
-          <Routes>
-            <Route path="/login" element={<Login onLoggedIn={refreshAuth} />} />
-            <Route element={<PrivateRoute authed={authed} />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/productos" element={<Productos />} />
-              <Route path="/proveedores" element={<Proveedores />} />
-              <Route path="/usuarios" element={<Usuarios />} />
-              <Route path="/maquinaria" element={<Maquinaria />} />
-              <Route path="/entradas" element={<Entradas />} />
-              <Route path="/salidas" element={<Salidas />} />
-              <Route path="/reportes" element={<Reportes />} />
-            </Route>
-          </Routes>
-        )}
-      </Layout>
-    </BrowserRouter>
+    <Routes>
+      <Route path="/" element={<Navigate to="/panel" replace />} />
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="/panel"
+        element={
+          <PrivateRoute>
+            <Panel />
+          </PrivateRoute>
+        }
+      />
+      <Route path="*" element={<div style={{ padding: 24 }}><h3>404</h3></div>} />
+    </Routes>
   );
 }

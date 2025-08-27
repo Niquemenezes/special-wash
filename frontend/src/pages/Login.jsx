@@ -1,57 +1,69 @@
+// src/pages/Login.jsx
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { loginAdmin } from "../api";
+import { useNavigate } from "react-router-dom";
+import { loginAdmin, authMe } from "../api";
+import { useAuth } from "../auth/AuthContext";
 
-export default function Login({ onLoggedIn }) {
+export default function Login() {
+  const nav = useNavigate();
+  const { setUser } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rol, setRol] = useState("administrador");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const nav = useNavigate();
-  const loc = useLocation();
+  const [err, setErr] = useState("");
 
-  const submit = async (e) => {
+  async function onSubmit(e) {
     e.preventDefault();
-    setError("");
+    setErr("");
     setLoading(true);
     try {
       await loginAdmin({ email, password, rol });
-      await onLoggedIn?.();
-      const next = loc.state?.from?.pathname || "/";
-      nav(next, { replace: true });
+      const me = await authMe();   // backend debe devolver 200 con datos del usuario
+      setUser(me);
+      nav("/panel", { replace: true });
     } catch (e) {
-      setError("Credenciales inválidas o error de red.");
+      setErr(e.message || "Error al iniciar sesión");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div className="container" style={{ maxWidth: 440 }}>
-      <h3 className="mt-5 mb-3">Iniciar sesión</h3>
-      {error && <div className="alert alert-warning">{error}</div>}
-      <form onSubmit={submit}>
-        <div className="mb-3">
-          <label className="form-label">Email</label>
-          <input className="form-control" value={email} onChange={e=>setEmail(e.target.value)} />
+    <div style={{ maxWidth: 420, margin: "60px auto", padding: 24, border: "1px solid #eee", borderRadius: 12 }}>
+      <h2 style={{ marginBottom: 16 }}>Iniciar sesión</h2>
+      {err && <div style={{ color: "crimson", marginBottom: 12 }}>{err}</div>}
+      <form onSubmit={onSubmit}>
+        <div style={{ marginBottom: 12 }}>
+          <label>Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={e=>setEmail(e.target.value)}
+            className="form-control"
+            placeholder="admin@specialwash.local"
+            required
+          />
         </div>
-        <div className="mb-3">
-          <label className="form-label">Contraseña</label>
-          <input type="password" className="form-control" value={password} onChange={e=>setPassword(e.target.value)} />
+        <div style={{ marginBottom: 12 }}>
+          <label>Contraseña</label>
+          <input
+            type="password"
+            value={password}
+            onChange={e=>setPassword(e.target.value)}
+            className="form-control"
+            placeholder="••••••••"
+            required
+          />
         </div>
-        <div className="mb-4">
-          <label className="form-label">Rol</label>
-          <select className="form-select" value={rol} onChange={e=>setRol(e.target.value)}>
-            <option>administrador</option>
-            <option>empleado</option>
-            <option>pintor</option>
-            <option>limpiador</option>
-            <option>mantenimiento</option>
-            <option>almacen</option>
+        <div style={{ marginBottom: 16 }}>
+          <label>Rol</label>
+          <select value={rol} onChange={e=>setRol(e.target.value)} className="form-control">
+            <option value="administrador">Administrador</option>
+            {/* agrega otros roles si fueran a loguear desde aquí */}
           </select>
         </div>
-        <button className="btn btn-primary w-100" disabled={loading}>
+        <button disabled={loading} className="btn btn-primary" type="submit">
           {loading ? "Entrando..." : "Entrar"}
         </button>
       </form>

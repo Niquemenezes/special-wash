@@ -1,13 +1,12 @@
-import React from "react";
-import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAuth } from "./AuthContext";
+// src/routes/PrivateRoute.jsx
+import { Navigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 
-export default function PrivateRoute() {
-  const { user, checking } = useAuth();
-  const loc = useLocation();
+export default function PrivateRoute({ children }) {
+  const { user, ready } = useAuth();
 
-  if (checking) return <div style={{ padding: 24 }}>Cargando…</div>;
-  if (!user) return <Navigate to="/login" replace state={{ from: loc }} />;
+  if (!ready) return null; // puedes poner un spinner aquí
+  if (!user) return <Navigate to="/login" replace />;
 
-  return <Outlet />;
+  return children;
 }
